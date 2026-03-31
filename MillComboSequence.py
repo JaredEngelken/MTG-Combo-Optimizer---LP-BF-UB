@@ -1,3 +1,11 @@
+#######################
+# Mill Combo Sequence #
+# v1.01               #
+# Jared Engelken      #
+# Python 3.13.5       #
+# 31.03.2026          #
+#######################
+
 from functools import lru_cache
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
@@ -18,21 +26,21 @@ class State:
 def legal_actions(state: State):
     actions = []
 
-    if state.lp_in_hand and (not state.jhoira or state.library >0):
+    if state.lp_in_hand and (not state.jhoira or state.library >1):
         actions.append(("LP_HAND", None))
 
     # Escape Lotus Petal
-    if state.graveyard >= 3 and (not state.jhoira or state.library >0):
+    if state.graveyard >= 3 and (not state.jhoira or state.library >1):
         actions.append(("LP_ESCAPE", None))
 
     if state.bf_in_hand and state.mana >= 2 and state.library > 0:
         actions.append(("BF_SELF_HAND", None))
 
     # Escape Brain Freeze targeting self
-    if state.mana >= 2 and state.graveyard >= 3 and state.library > 0:
+    if state.mana >= 2 and state.graveyard >= 3 and state.library > 1:
         actions.append(("BF_SELF_ESCAPE", None))
 
-    if state.bf_in_hand and state.mana >= 2:
+    if state.bf_in_hand and state.mana >= 2 and state.library > 1:
         actions.append(("BF_OPP_HAND", None))
 
     # Escape Brain Freeze targeting each living opponent
@@ -77,12 +85,25 @@ def apply_action(state: State, action):
     bf_mill = 3 * (s + 1)
 
     if kind == "BF_SELF_HAND":
+        safe_self_mill = min(bf_mill, max(0, state.library - 1))
+        spillover = bf_mill - safe_self_mill
+
+        opps = list(state.opponents)
+
+        for i in range(len(opps)):
+            if spillover <= 0:
+                break
+            if opps[i] > 0:
+                mill_amount = min(opps[i], spillover)
+                opps[i] -= mill_amount
+                spillover -= mill_amount
+
         return State(
             storm = s + 1,
             mana = state.mana - 2,
-            graveyard = state.graveyard + bf_mill,
-            library = max(0, state.library - bf_mill),
-            opponents = state.opponents,
+            graveyard = state.graveyard + safe_self_mill,
+            library = state.library - safe_self_mill,
+            opponents = tuple(opps),
             lp_in_hand = state.lp_in_hand,
             bf_in_hand = False,
             jhoira = state.jhoira,
@@ -90,12 +111,25 @@ def apply_action(state: State, action):
         )
     
     if kind == "BF_SELF_ESCAPE":
+        safe_self_mill = min(bf_mill, max(0, state.library - 1))
+        spillover = bf_mill - safe_self_mill
+
+        opps = list(state.opponents)
+
+        for i in range(len(opps)):
+            if spillover <= 0:
+                break
+            if opps[i] > 0:
+                mill_amount = min(opps[i], spillover)
+                opps[i] -= mill_amount
+                spillover -= mill_amount
+
         return State(
             storm = s + 1,
             mana = state.mana - 2,
-            graveyard = state.graveyard - 3 + bf_mill,
-            library = max(0, state.library - bf_mill),
-            opponents = state.opponents,
+            graveyard = state.graveyard - 3 + safe_self_mill,
+            library = state.library - safe_self_mill,
+            opponents = tuple(opps),
             lp_in_hand = state.lp_in_hand,
             bf_in_hand = False,
             jhoira = state.jhoira,
@@ -157,11 +191,8 @@ def apply_action(state: State, action):
 
 
 def score(state: State):
-    # primary: opponents killed
     kills = sum(1 for x in state.opponents if x == 0)
-    # secondary: total mill dealt
     total_mill = sum(99 - x for x in state.opponents)
-    # tertiarry: total cards used from library
     library_used = state.starting_library - state.library
     return kills, total_mill, -library_used
 
@@ -191,6 +222,20 @@ def search(state: State, depth_limit: int = 30):
 def get_int(prompt, default):
     return int(input(prompt) or default)
 
+def describe_action(kind):
+    if kind == "BF_OPP_HAND":
+        return "Cast Brain Freeze against opponent(s)."
+    elif kind == "BF_OPP_ESCAPE":
+        return "Escape Brain Freeze against opponent(s)."
+    elif kind == "BF_SELF_HAND":
+        return "Cast Brain Freeze on yourself."
+    elif kind == "BF_SELF_ESCAPE":
+        return "Escape Brain Freeze on yourself."
+    elif kind == "LP_HAND":
+        return "Cast and crack Lotus Petal."
+    else:
+        return "Escape and crack Lotus Petal."
+
 if __name__ == "__main__":
     
     opponents_number = get_int("How many opponents? ", 1)
@@ -209,26 +254,46 @@ if __name__ == "__main__":
     )
 
     result_score, result_path = search(initial_state, depth_limit=24)
+    kills = result_score[0]
+    total_opponents = len(initial_state.opponents)
+
+    if kills == total_opponents:
+        print("\nWinning line found.")
+    else:
+        print("\nNo full-table winning line found.")
 
     final_state = initial_state
     for action in result_path:
         final_state = apply_action(final_state, action)
 
     print("\nBest score (kills, total mill, efficiency):", result_score)
-    print("Library remaining:", final_state.library)
+    print("Cards remaining in library:", final_state.library)
     print("Best sequence:")
-    for step, action in enumerate(result_path, 1):
-        kind, _ = action
 
-        if kind == "BF_OPP_HAND":
-            print(f"{step}: Cast Brain Freeze against opponent(s).")
-        elif kind == "BF_OPP_ESCAPE":
-            print(f"{step}: Escape Brain Freeze against opponent(s).")
-        elif kind == "BF_SELF_HAND":
-            print(f"{step}: Cast Brain Freeze on yourself.")
-        elif kind == "BF_SELF_ESCAPE":
-            print(f"{step}: Escape Brain Freeze on yourself.")
-        elif kind == "LP_HAND":
-            print(f"{step}: Cast and crack Lotus Petal.")
+    if result_path:
+        current_kind = result_path[0][0]
+        count = 1
+        start_step = 1
+
+        for step in range(1, len(result_path)):
+            next_kind = result_path[step][0]
+
+            if next_kind == current_kind:
+                count += 1
+            else:
+                action_text = describe_action(current_kind)
+                if count == 1:
+                    print(f"{start_step}: {action_text}")
+                else:
+                    print(f"{start_step}: {action_text} ×{count}")
+
+                current_kind = next_kind
+                count = 1
+                start_step = step + 1
+
+        # print final block
+        action_text = describe_action(current_kind)
+        if count == 1:
+            print(f"{start_step}: {action_text}")
         else:
-            print(f"{step}: Escape and crack Lotus Petal.")
+            print(f"{start_step}: {action_text} ×{count}")
