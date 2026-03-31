@@ -1,6 +1,6 @@
 #######################
 # Mill Combo Sequence #
-# v1.01               #
+# v1.03               #
 # Jared Engelken      #
 # Python 3.13.5       #
 # 31.03.2026          #
@@ -222,19 +222,52 @@ def search(state: State, depth_limit: int = 30):
 def get_int(prompt, default):
     return int(input(prompt) or default)
 
-def describe_action(kind):
-    if kind == "BF_OPP_HAND":
+def describe_action(kind, state):
+    if kind in ("BF_SELF_HAND", "BF_SELF_ESCAPE"):
+        bf_mill = 3 * (state.storm + 1)
+        safe_self_mill = max(0, state.library - 1)
+
+        if bf_mill > safe_self_mill:
+            prefix = "Cast" if kind == "BF_SELF_HAND" else "Escape"
+            return f"{prefix} Brain Freeze on yourself with extra copies against opponent(s)."
+
+        return "Cast Brain Freeze on yourself." if kind == "BF_SELF_HAND" else "Escape Brain Freeze on yourself."
+
+    elif kind == "BF_OPP_HAND":
         return "Cast Brain Freeze against opponent(s)."
+
     elif kind == "BF_OPP_ESCAPE":
         return "Escape Brain Freeze against opponent(s)."
-    elif kind == "BF_SELF_HAND":
-        return "Cast Brain Freeze on yourself."
-    elif kind == "BF_SELF_ESCAPE":
-        return "Escape Brain Freeze on yourself."
+
     elif kind == "LP_HAND":
         return "Cast and crack Lotus Petal."
+
     else:
         return "Escape and crack Lotus Petal."
+    
+def print_compressed_sequence(initial_state, result_path):
+    compressed = []
+    current_state = initial_state
+
+    for action in result_path:
+        kind, _ = action
+        label = describe_action(kind, current_state)
+
+        if compressed and compressed[-1][0] == label:
+            compressed[-1][1] += 1
+        else:
+            compressed.append([label, 1])
+
+        current_state = apply_action(current_state, action)
+
+    # Print nicely
+    step = 1
+    for label, count in compressed:
+        if count == 1:
+            print(f"{step}: {label}")
+        else:
+            print(f"{step}: {label} ×{count}")
+        step += count
 
 if __name__ == "__main__":
     
@@ -269,31 +302,4 @@ if __name__ == "__main__":
     print("\nBest score (kills, total mill, efficiency):", result_score)
     print("Cards remaining in library:", final_state.library)
     print("Best sequence:")
-
-    if result_path:
-        current_kind = result_path[0][0]
-        count = 1
-        start_step = 1
-
-        for step in range(1, len(result_path)):
-            next_kind = result_path[step][0]
-
-            if next_kind == current_kind:
-                count += 1
-            else:
-                action_text = describe_action(current_kind)
-                if count == 1:
-                    print(f"{start_step}: {action_text}")
-                else:
-                    print(f"{start_step}: {action_text} ×{count}")
-
-                current_kind = next_kind
-                count = 1
-                start_step = step + 1
-
-        # print final block
-        action_text = describe_action(current_kind)
-        if count == 1:
-            print(f"{start_step}: {action_text}")
-        else:
-            print(f"{start_step}: {action_text} ×{count}")
+    print_compressed_sequence(initial_state, result_path)
